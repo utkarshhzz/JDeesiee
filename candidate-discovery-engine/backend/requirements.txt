@@ -1,0 +1,68 @@
+# ============================================================================
+# CORE FRAMEWORK
+# ============================================================================
+fastapi>=0.115.0            # The web framework — handles HTTP requests, routing, validation
+uvicorn[standard]>=0.32.0   # ASGI server — actually runs FastAPI (like a waiter serving food)
+gunicorn>=22.0.0            # Process manager — runs multiple uvicorn workers in production
+python-multipart>=0.0.12    # Required for file uploads (FastAPI needs this for UploadFile)
+
+# ============================================================================
+# DATA VALIDATION & SETTINGS
+# ============================================================================
+pydantic>=2.9.0             # Data validation — ensures data matches expected shapes
+pydantic-settings>=2.6.0    # Reads configuration from .env files and environment variables
+
+# ============================================================================
+# DATABASE (PostgreSQL)
+# ============================================================================
+sqlalchemy[asyncio]>=2.0.36 # ORM — maps Python classes to database tables (async version)
+asyncpg>=0.30.0             # Async PostgreSQL driver — the actual wire protocol to talk to Postgres
+alembic>=1.14.0             # Database migrations — version control for your database schema
+greenlet>=3.1.0             # Required by SQLAlchemy async internals
+
+# ============================================================================
+# CACHE (Redis)
+# ============================================================================
+redis[hiredis]>=5.2.0       # Async Redis client (hiredis = C-based parser, 10x faster)
+
+# ============================================================================
+# AZURE SERVICES
+# ============================================================================
+openai>=1.57.0              # Azure OpenAI SDK — generates embeddings and LLM scores
+azure-search-documents>=11.6.0  # Azure AI Search SDK — vector search over 110M candidates
+azure-storage-blob>=12.24.0    # Azure Blob Storage — stores uploaded JD files
+azure-identity>=1.19.0     # Azure authentication (for managed identity in production)
+
+# ============================================================================
+# DOCUMENT EXTRACTION
+# ============================================================================
+PyMuPDF>=1.25.0             # PDF text extraction (the "fitz" library)
+python-docx>=1.1.2          # DOCX text extraction
+
+# ============================================================================
+# HTTP & RESILIENCE
+# ============================================================================
+httpx>=0.28.0               # Async HTTP client — used for webhook calls (NOT requests library)
+tenacity>=9.0.0             # Retry logic with exponential backoff for flaky external APIs
+
+# ============================================================================
+# OBSERVABILITY (Enhancement H — OpenTelemetry)
+# ============================================================================
+structlog>=24.4.0           # Structured JSON logging — every log entry is machine-parseable
+azure-monitor-opentelemetry>=1.6.0  # Azure Monitor + OpenTelemetry distro (tracing)
+
+# ============================================================================
+# TESTING
+# ============================================================================
+pytest>=8.3.0               # Test runner
+pytest-asyncio>=0.24.0      # Async test support (our entire app is async)
+pytest-mock>=3.14.0         # Mocking external services in tests
+respx>=0.22.0               # Mock httpx calls specifically (for webhook tests)
+faker>=33.0.0               # Generates realistic fake data for tests and seed scripts
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+tqdm>=4.67.0                # Progress bars for long-running scripts
+python-jose[cryptography]>=3.3.0  # JWT token encoding/decoding
+passlib[bcrypt]>=1.7.4      # Password hashing (for future auth features)
