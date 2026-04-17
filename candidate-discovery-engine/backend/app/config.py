@@ -1,23 +1,4 @@
-"""
-Application configuration via Pydantic Settings.
 
-WHY THIS FILE EXISTS:
-    Every external service (PostgreSQL, Redis, Azure OpenAI, Azure AI Search)
-    needs credentials and connection details. Instead of scattering os.getenv()
-    calls throughout the codebase, we centralise ALL configuration here.
-
-HOW IT WORKS:
-    1. Pydantic Settings automatically reads from environment variables.
-    2. You can also place values in a .env file for local development.
-    3. On Azure, secrets come from Key Vault → App Service env vars → here.
-    4. If a required variable is missing, the app crashes at startup with a
-       clear error message — NOT at midnight when a user happens to trigger
-       the code path that needs it.
-
-USAGE:
-    from app.config import settings
-    print(settings.DATABASE_URL)  # Ready to use, type-safe, validated
-"""
 
 from __future__ import annotations
 
@@ -25,27 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """
-    Central configuration for the Candidate Discovery Engine.
-
-    Every field maps to an environment variable of the same name.
-    For example, the field `DATABASE_URL` reads from the env var `DATABASE_URL`.
-
-    Fields with default values are optional in the .env file.
-    Fields without defaults are REQUIRED — the app won't start without them.
-    """
-
-    # ──────────────────────────────────────────────────────────────────────
-    # APPLICATION
-    # ──────────────────────────────────────────────────────────────────────
-    APP_NAME: str = "Candidate Discovery Engine"
+    APP_NAME: str = "JDEesiee"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False  # Set True in dev for verbose logging; never in prod
-    ENVIRONMENT: str = "development"  # "development", "staging", "production"
+    DEBUG: bool = False 
+    ENVIRONMENT: str = "development"
 
-    # Comma-separated list of allowed CORS origins.
-    # In production, this should be your frontend domain only.
-    # Example: "https://recruit.example.com,https://staging.recruit.example.com"
+
     CORS_ORIGINS: str = "http://localhost:5173"  # Vite dev server default
 
     # ──────────────────────────────────────────────────────────────────────
@@ -55,14 +21,7 @@ class Settings(BaseSettings):
     # We use asyncpg (async driver) NOT psycopg2 (sync driver).
     # Why asyncpg? Because FastAPI is async, and mixing sync DB calls inside
     # async route handlers blocks the event loop → kills throughput.
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/candidate_engine"
-
-    # Connection pool settings.
-    # pool_size=20: Keep 20 persistent connections to PostgreSQL.
-    # max_overflow=10: Allow 10 extra connections during traffic spikes.
-    # Why these numbers? Azure PostgreSQL Burstable B1ms allows max ~50
-    # connections. We reserve 30 (20+10) for the app, leaving room for
-    # Alembic migrations, monitoring, and manual debugging.
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/JDEesiee"
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
 
@@ -164,11 +123,4 @@ class Settings(BaseSettings):
         case_sensitive=True,
     )
 
-
-# ──────────────────────────────────────────────────────────────────────────
-# SINGLETON INSTANCE
-# ──────────────────────────────────────────────────────────────────────────
-# We create a single instance at module level. Every file that does
-# `from app.config import settings` gets the SAME instance.
-# This avoids re-parsing env vars on every import.
 settings = Settings()
