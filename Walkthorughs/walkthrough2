@@ -1,0 +1,344 @@
+# 🔍 Phase 1 Code Review + System Design + GitHub Fix
+
+## Part 1: Bug Report — 9 Bugs Found
+
+I found **9 bugs** across your files. Some are small typos, some would crash the entire app. I'll explain each one in a way where you learn the *why*.
+
+---
+
+### Bug 1: 🔴 CRITICAL — `rai_report.py` is missing the class definition!
+
+**File:** `rai_report.py`
+
+**What's wrong:** All your columns are floating at the module level — they're NOT inside a class. It's like writing ingredients on a piece of paper but never putting them in the bowl. SQLAlchemy won't recognize any of these as table columns.
+
+**Your code:**
+```python
+from app.models.base import Base, UUIDPrimaryKeyMixin
+
+__tablename__ = "rai_reports"   # ← This is just a module variable, NOT a table name
+
+search_event_id: Mapped[uuid.UUID] = mapped_column(  # ← Module-level, not a column!
+    ...
+)
+```
+
+**Fix — wrap everything in a class:**
+```python
+from app.models.base import Base, UUIDPrimaryKeyMixin
+
+class RAIReport(Base, UUIDPrimaryKeyMixin):          # ← THE CLASS WAS MISSING!
+    __tablename__ = "rai_reports"
+
+    search_event_id: Mapped[uuid.UUID] = mapped_column(  # ← Now it's a column!
+        ...
+    )
+    # ... all other columns indented inside the class
+```
+
+**Why this matters:** In Python, indentation isn't cosmetic — it defines ownership. If code is indented inside a class, it belongs to that class. If it's at the left edge, it belongs to the module (the file). SQLAlchemy only looks for columns *inside* classes that inherit from `Base`.
+
+Also remove `from sqlalchemy import true` (line 8) — unused import, and move `from __future__ import annotations` to line 1.
+
+---
+
+### Bug 2: 🔴 CRITICAL — Name mismatch: `UUIDPrimaryMixin` vs `UUIDPrimaryKeyMixin`
+
+**The problem:** You named the class `UUIDPrimaryMixin` in `base.py` (line 27), but FIVE other files try to import `UUIDPrimaryKeyMixin` — which doesn't exist!
+
+| File | Imports | base.py has |
+|------|---------|------------|
+| `candidate.py` line 7 | `UUIDPrimaryKeyMixin` ❌ | `UUIDPrimaryMixin` |
+| `match_result.py` line 17 | `UUIDPrimaryKeyMixin` ❌ | `UUIDPrimaryMixin` |
+| `webhook_event.py` line 9 | `UUIDPrimaryKeyMixin` ❌ | `UUIDPrimaryMixin` |
+| `rai_report.py` line 17 | `UUIDPrimaryKeyMixin` ❌ | `UUIDPrimaryMixin` |
+| `prompt_variant.py` line 9 | `UUIDPrimaryKeyMixin` ❌ | `UUIDPrimaryMixin` |
+
+**Fix:** Change `base.py` line 27 to match what everything else expects:
+```python
+# In base.py, change:
+class UUIDPrimaryMixin:      # ← Current (missing "Key")
+# To:
+class UUIDPrimaryKeyMixin:   # ← Matches all imports
+```
+
+Also update `__init__.py` line 1 which imports `UUIDPrimaryMixin` — change it to `UUIDPrimaryKeyMixin`.
+
+And `search_event.py` line 10 imports `UUIDPrimaryMixin` — change to `UUIDPrimaryKeyMixin`.
+
+---
+
+### Bug 3: 🔴 CRITICAL — `candidate` class is lowercase
+
+**File:** `candidate.py` line 11
+
+```python
+class candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):  # ❌ lowercase
+```
+
+But `__init__.py` line 2 imports:
+```python
+from app.models.candidate import Candidate  # ❌ Will crash — 'Candidate' doesn't exist
+```
+
+**Fix:** Change line 11 of `candidate.py`:
+```python
+class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):  # ✅ PascalCase
+```
+
+**Why:** Python class names must be PascalCase by convention (PEP 8). More importantly, the import says `Candidate` — Python is case-sensitive, so `candidate` ≠ `Candidate`.
+
+---
+
+### Bug 4: 🔴 CRITICAL — Syntax error in `search_event.py` line 72
+
+```python
+candidates_searched= Mapped[int | None]= mapped_column(  # ❌ TWO equals signs
+```
+
+Python sees `= Mapped[int | None] =` and thinks you're doing TWO assignments on one line — that's illegal syntax.
+
+**Fix:** Change `=` to `:` (colon declares a type annotation):
+```python
+candidates_searched: Mapped[int | None] = mapped_column(  # ✅ colon, then equals
+```
+
+**The rule:** In SQLAlchemy 2.0 column definitions:
+- `:` means "this attribute has this type" (type annotation)
+- `=` means "this attribute has this value" (assignment)
+- Pattern: `name: Type = mapped_column(...)` — colon for type, equals for value
+
+---
+
+### Bug 5: 🔴 CRITICAL — `match_result.py` has wrong import order AND wrong table name
+
+**Line 1:** `from sqlalchemy import false` — unused AND it's before `from __future__`
+
+**Line 21:** `__tablename__ = "Match_results"` ← capital M!
+
+But `webhook_event.py` line 21 references: `ForeignKey("match_results.id")` ← lowercase m!
+
+PostgreSQL table names are case-sensitive when quoted. This FK will fail because `"Match_results"` ≠ `"match_results"`.
+
+**Fix:**
+1. Delete line 1 (`from sqlalchemy import false`)
+2. Change `"Match_results"` → `"match_results"` (line 21)
+
+---
+
+### Bug 6: 🟡 MODERATE — `prompt_variant.py` line 90 has a typo
+
+```python
+__tablename__ = "prompt_experimemts"   # ❌ "experimemts"
+```
+
+**Fix:**
+```python
+__tablename__ = "prompt_experiments"   # ✅ "experiments"
+```
+
+This would cause SQLAlchemy to create a table named `prompt_experimemts` — it works but looks unprofessional. Any FK referencing the correct spelling would break.
+
+---
+
+### Bug 7: 🟡 MODERATE — `candidate.py` line 95 has inconsistent indentation
+
+```python
+     # ── Table-level indexes   ← 5 spaces (extra space)
+    __table_args__ = (          ← 4 spaces (correct)
+```
+
+Python is whitespace-sensitive. That extra space on the comment won't crash anything, but the inconsistency could cause subtle issues in some editors/linters.
+
+---
+
+### Bug 8: 🟡 MODERATE — `match_result.py` line 40 has inconsistent indentation
+
+```python
+     # ── Scoring ─────         ← 5 spaces (extra space)
+    match_score: Mapped[float]  ← 4 spaces (correct)
+```
+
+Same issue — extra leading space on the comment.
+
+---
+
+### Bug 9: 🟢 MINOR — Several typos in comments
+
+| File | Line | Has | Should Be |
+|------|------|-----|-----------|
+| `search_event.py` | 26 | `"SHA-256 hex hash of the 3d test"` | `"SHA-256 hex hash of the JD text"` |
+| `search_event.py` | 53 | `"time to generate /retrieve 3D embedding"` | `"Time to generate/retrieve JD embedding"` |
+| `search_event.py` | 58 | `"ANN vecor search"` | `"ANN vector search"` |
+
+---
+
+## Part 2: System Design — What We Built
+
+### The Big Picture
+
+Here's what our data layer looks like — these are the "blueprints" for 7 database tables:
+
+```mermaid
+erDiagram
+    candidates ||--o{ match_results : "is scored in"
+    search_events ||--o{ match_results : "produces"
+    match_results ||--o{ webhook_events : "triggers"
+    search_events ||--o| rai_reports : "generates"
+    prompt_variants ||--o{ prompt_experiments : "is tested in"
+    search_events ||--o{ prompt_experiments : "runs"
+    candidates ||--o{ prompt_experiments : "is scored by"
+
+    candidates {
+        uuid id PK
+        string full_name
+        string email UK
+        string location_country
+        int years_of_experience
+        jsonb skills
+        text resume_text
+        string vector_id
+        bool is_active
+        timestamp created_at
+    }
+
+    search_events {
+        uuid id PK
+        string recruiter_id
+        string jd_text_hash
+        text jd_raw_text
+        jsonb top_candidates_ids
+        int latency_stage1_ms
+        int latency_stage2_ms
+        int total_latency_ms
+    }
+
+    match_results {
+        uuid id PK
+        uuid search_event_id FK
+        uuid candidate_id FK
+        decimal match_score
+        decimal vector_similarity
+        text justification_bullet_1
+        text justification_bullet_2
+        int rank
+    }
+
+    webhook_events {
+        uuid id PK
+        uuid match_result_id FK
+        string webhook_url
+        jsonb payload
+        int http_status
+        int attempt_number
+    }
+
+    rai_reports {
+        uuid id PK
+        uuid search_event_id FK
+        jsonb demographic_distribution
+        jsonb bias_flags
+        int jd_inclusivity_score
+        jsonb exclusionary_phrases
+        jsonb recommendations
+    }
+
+    prompt_variants {
+        uuid id PK
+        string name UK
+        text system_prompt
+        float temperature
+        int traffic_percentage
+        bool is_production
+    }
+
+    prompt_experiments {
+        uuid id PK
+        uuid variant_id FK
+        uuid search_event_id FK
+        uuid candidate_id FK
+        float score_given
+        int latency_ms
+        int tokens_used
+    }
+```
+
+### How The Tables Connect (The Data Flow Story)
+
+Think of it as a story that happens when a recruiter searches:
+
+**Step 1: The Setup (pre-existing data)**
+> 110 million rows are already in the `candidates` table. Each candidate also has a vector embedding stored in Azure AI Search (linked by `vector_id`).
+
+**Step 2: Recruiter searches (creates `search_events`)**
+> A recruiter pastes a job description. We create a `search_events` row capturing: who searched, what they searched for (the JD text), and a hash for caching.
+
+**Step 3: Vector search finds candidates, LLM scores them (creates `match_results`)**
+> The pipeline finds the top 100 candidates via HNSW vector search, then scores the top 20 using GPT-4o-mini. Each of the 20 scores becomes a `match_results` row, linked to both the `search_event` and the `candidate`.
+
+**Step 4: High scorers trigger webhooks (creates `webhook_events`)**
+> Any candidate scoring >90 triggers a webhook to n8n/Power Automate. Each delivery attempt is tracked as a `webhook_events` row. If the first attempt fails, we retry (up to 3 times = up to 3 rows).
+
+**Step 5: Responsible AI report generated (creates `rai_reports`)**
+> After scoring, we analyze the results for fairness. One `rai_reports` row per search, storing aggregate demographic stats, bias flags, and JD language analysis.
+
+**Step 6: Prompt experiment tracked (creates `prompt_experiments`)**
+> If A/B testing is enabled, we record which prompt variant was used for each candidate scoring. This lets us compare prompt performance over time.
+
+### The Architecture Layers
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    FRONTEND (React)                   │
+│         Search Page │ Cards │ Dashboards              │
+└──────────────────────┬───────────────────────────────┘
+                       │ HTTP/WebSocket
+┌──────────────────────▼───────────────────────────────┐
+│                 API LAYER (FastAPI)                    │
+│    POST /search  │  GET /candidates  │  WS /ws/search │
+├───────────────────────────────────────────────────────┤
+│              SERVICE LAYER (Business Logic)            │
+│  Extractor │ Embedder │ VectorSearch │ Reasoner        │
+│  Pipeline │ WebhookDispatcher │ ResponsibleAI          │
+│  SkillAnalyzer │ PromptABTesting                       │
+├───────────────────────────────────────────────────────┤
+│              DATA LAYER (What we built so far!)        │
+│  ┌──────────┐  ┌─────────┐  ┌────────────────────┐   │
+│  │PostgreSQL│  │  Redis   │  │ Azure AI Search    │   │
+│  │(7 tables)│  │ (cache)  │  │ (110M vectors)     │   │
+│  └──────────┘  └─────────┘  └────────────────────┘   │
+├───────────────────────────────────────────────────────┤
+│              OBSERVABILITY (Enhancement H)             │
+│  structlog (JSON logs) + OpenTelemetry (traces)        │
+│  → Azure Application Insights                          │
+└───────────────────────────────────────────────────────┘
+```
+
+**We just finished the bottom DATA LAYER** — the foundation everything else builds on. Next we'll build the SERVICE LAYER (the brains), then the API LAYER (the routes), then the FRONTEND.
+
+---
+
+## Part 3: GitHub Fix — Large Files in Git History
+
+### What Happened
+
+The error `pre-receive hook declined` means GitHub is **rejecting your push** because your repository contains files larger than GitHub's 100MB limit.
+
+Looking at your git history, I found the culprit — a **`Resumes/` folder** with massive zip files:
+
+| File | Size |
+|------|------|
+| `Resumes/Resume.zip` | **329 MB** 🚨 |
+| `Resumes/OneDrive_2026-04-17 (1)666.zip` | **173 MB** 🚨 |
+| `Resumes/OneDrive_2026-04.zip` | **24 MB** |
+| `Resumes/Kusto-Devops-Azure-C#.zip` | **9 MB** |
+
+Even though you added `Resumes` to `.gitignore`, the files are **already committed in past git history**. `.gitignore` only prevents *future* tracking — it doesn't remove files from past commits.
+
+### The Fix
+
+We need to **rewrite git history** to remove these files permanently. This uses `git filter-branch` or the cleaner `git filter-repo` tool.
+
+> [!CAUTION]
+> This rewrites all commit hashes. If anyone else has cloned the repo, they'll need to re-clone. Since it's your personal project, this is fine.
+
