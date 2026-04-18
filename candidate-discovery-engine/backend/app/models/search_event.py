@@ -7,9 +7,9 @@ from sqlalchemy import Integer,String,Text
 from sqlalchemy.dialects.postgresql import JSONB,UUID
 from sqlalchemy.orm import Mapped,mapped_column
 
-from app.models.base import Base,UUIDPrimaryMixin
+from app.models.base import Base,UUIDPrimaryKeyMixin
 
-class SearchEvent(Base,UUIDPrimaryMixin):
+class SearchEvent(Base,UUIDPrimaryKeyMixin):
     __tablename__= "search_events"
     
     recruiter_id:Mapped[str]=mapped_column(

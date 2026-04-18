@@ -1,0 +1,54 @@
+# ============================================================================
+# Docker Compose — Local Development Environment
+# ============================================================================
+# WHAT THIS DOES:
+#   Spins up PostgreSQL and Redis locally in Docker containers.
+#   You don't need to install PostgreSQL or Redis on your machine.
+#   Just run: docker-compose up -d
+#
+# WHY DOCKER?
+#   1. Consistent: Same versions as production (PostgreSQL 16, Redis 7)
+#   2. Clean: Stop the containers and your machine is clean
+#   3. Fast: Takes 30 seconds to spin up, not 30 minutes to install
+#   4. Shareable: Anyone cloning the repo can run `docker-compose up` and go
+# ============================================================================
+
+services:
+  # ── PostgreSQL Database ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine    # Alpine = smaller Docker image (~80MB vs ~400MB)
+    container_name: jdeesiee-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: JDEesiee     # Creates this database on first startup
+    ports:
+      - "5432:5432"              # Maps container port to localhost:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # Persist data across restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis Cache ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: jdeesiee-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# ── Named Volumes ───────────────────────────────────────────────────
+# Docker volumes persist data even when containers are stopped/removed.
+# Without this, every `docker-compose down` would delete your database!
+volumes:
+  postgres_data:
+  redis_data:

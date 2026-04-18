@@ -24,7 +24,7 @@ class TimestampMixin:
         nullable=False,
     )
 
-class UUIDPrimaryMixin:
+class UUIDPrimaryKeyMixin:
     id: Mapped[uuid.UUID]=mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
