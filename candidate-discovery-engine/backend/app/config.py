@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # We use asyncpg (async driver) NOT psycopg2 (sync driver).
     # Why asyncpg? Because FastAPI is async, and mixing sync DB calls inside
     # async route handlers blocks the event loop → kills throughput.
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/JDEesiee"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/JDEesiee"
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
 

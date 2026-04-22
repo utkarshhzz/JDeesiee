@@ -66,3 +66,8 @@ faker>=33.0.0               # Generates realistic fake data for tests and seed s
 tqdm>=4.67.0                # Progress bars for long-running scripts
 python-jose[cryptography]>=3.3.0  # JWT token encoding/decoding
 passlib[bcrypt]>=1.7.4      # Password hashing (for future auth features)
+
+structlog
+redis
+PyMuPDF
+fitz

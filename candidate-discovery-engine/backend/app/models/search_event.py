@@ -69,7 +69,7 @@ class SearchEvent(Base,UUIDPrimaryKeyMixin):
     )
 
     # metadata
-    candidates_searched= Mapped[int | None]= mapped_column(
+    candidates_searched: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
         default=110_000_000,

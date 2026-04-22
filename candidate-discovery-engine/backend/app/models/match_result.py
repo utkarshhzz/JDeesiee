@@ -17,7 +17,7 @@ from app.models.base import Base, UUIDPrimaryKeyMixin
 
 class MatchResult(Base,UUIDPrimaryKeyMixin):
 
-    __tablename__="Match_results"
+    __tablename__="match_results"
 
     # foreign keys
     search_event_id: Mapped[uuid.UUID]= mapped_column(

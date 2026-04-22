@@ -8,7 +8,7 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 from pydantic import BaseModel,ConfigDict,Field
 
-class candidate(Base,UUIDPrimaryKeyMixin,TimestampMixin):
+class Candidate(Base,UUIDPrimaryKeyMixin,TimestampMixin):
     __tablename__="candidates"
 
     external_id:Mapped[str | None]= mapped_column(
