@@ -522,14 +522,13 @@ def generate_resume_text(
 
     "University of Melbourne", "Australian National University",
     "Technical University of Munich", "RWTH Aachen",
-    ]
+        ]
 
-    edu_section= f"""
-    {education} in {random.choice(['Computer Science', 'Information Technology', 'Software Engineering', 'Data Science', 'Electronics', 'Mathematics', 'Business Administration'])}
-    {random.choice(universities)}, {random.randint(2005, 2023)}
-    
-    
-    """
+        edu_section = f"""
+EDUCATION
+{education} in {random.choice(['Computer Science', 'Information Technology', 'Software Engineering', 'Data Science', 'Electronics', 'Mathematics', 'Business Administration'])}
+{random.choice(universities)}, {random.randint(2005, 2023)}
+"""
 
     text = f"""{name}
     {title} | {city}, {country}
