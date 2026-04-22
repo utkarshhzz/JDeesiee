@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # We use asyncpg (async driver) NOT psycopg2 (sync driver).
     # Why asyncpg? Because FastAPI is async, and mixing sync DB calls inside
     # async route handlers blocks the event loop → kills throughput.
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/JDEesiee"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:[YOUR-PASSWORD]@db.uvczlwvghnptqjtzaeno.supabase.co:5432/postgres"
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
 
@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     # ──────────────────────────────────────────────────────────────────────
     model_config = SettingsConfigDict(
         # Look for a .env file in the backend/ directory
-        env_file=".env",
+        env_file=("../../.env", "../.env", ".env"),
         # If the .env file doesn't exist, don't crash — use defaults
         env_file_encoding="utf-8",
         # Allow extra fields (future-proofing for new env vars)

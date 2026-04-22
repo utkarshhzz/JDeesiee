@@ -121,11 +121,18 @@ PHONE_PATTERN = re.compile(r"[\+]?[\d\s\-\(\)]{7,15}")
 # =====================================================================
 # PARSER — extracts structured fields from raw resume text
 # =====================================================================
-def parse_resume_text(text: str, filename: str) -> dict:
+def parse_resume_text(text: str, file_path: str) -> dict:
     """
     Best-effort regex parser. Won't be perfect for every format.
     That's OK — the LLM reads the full resume_text during scoring.
+    
+    Args:
+        text: extracted resume text
+        file_path: FULL path to the file (used for unique external_id)
     """
+    # Strip null bytes — PostgreSQL rejects 0x00 in UTF-8 text
+    text = text.replace("\x00", "")
+
     # Email
     email_match = EMAIL_PATTERN.search(text)
     email = email_match.group(0) if email_match else None
@@ -134,19 +141,47 @@ def parse_resume_text(text: str, filename: str) -> dict:
     phone_match = PHONE_PATTERN.search(text[:500])
     phone = phone_match.group(0).strip() if phone_match else None
 
-    # Name — usually the first short, non-header line
-    # Handle ALL-CAPS names like "JOHN DOE" → "John Doe"
+    # Name extraction — improved strategy:
+    # 1. Try the first line that looks like a name (2-4 words, no special chars)
+    # 2. Fallback: extract from email (john.doe@gmail.com → John Doe)
+    # 3. Last resort: use filename
+    NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z .'-]{2,50}$")
     lines = [line.strip() for line in text.split("\n") if line.strip()]
-    full_name = "Unknown Candidate"
-    for line in lines[:5]:
+    full_name = None
+
+    for line in lines[:8]:
+        # Skip lines that look like headers, contact info, or URLs
         if (
-            len(line) < 60
-            and not EMAIL_PATTERN.search(line)
-            and not line.startswith(("http", "www", "+"))
-            and not any(kw in line.lower() for kw in ["resume", "curriculum", "profile", "objective"])
+            EMAIL_PATTERN.search(line)
+            or line.startswith(("http", "www", "+", "("))
+            or any(kw in line.lower() for kw in [
+                "resume", "curriculum", "profile", "objective",
+                "phone", "address", "email", "linkedin", "github",
+                "summary", "experience", "education", "skill",
+            ])
+            or len(line) > 60
+            or len(line.split()) > 5  # Names rarely have more than 5 words
         ):
+            continue
+        # Check if it looks like a name (alphabetic words)
+        if NAME_PATTERN.match(line):
             full_name = line.title() if line.isupper() else line
             break
+
+    # Fallback: parse name from email (john.doe@gmail → John Doe)
+    if not full_name and email:
+        local_part = email.split("@")[0]
+        name_parts = re.split(r"[._-]+", local_part)
+        name_parts = [p for p in name_parts if not p.isdigit() and len(p) > 1]
+        if name_parts:
+            full_name = " ".join(p.title() for p in name_parts)
+
+    # Last fallback: use filename
+    if not full_name:
+        full_name = Path(file_path).stem.replace("_", " ").replace("-", " ").title()
+
+    if not full_name or full_name.strip() == "":
+        full_name = "Unknown Candidate"
 
     # Skills — check which keywords appear in text
     text_lower = text.lower()
@@ -191,7 +226,9 @@ def parse_resume_text(text: str, filename: str) -> dict:
 
     return {
         "id": uuid.uuid4(),
-        "external_id": f"resume-{hashlib.md5(filename.encode()).hexdigest()[:12]}",
+        # Hash FULL PATH, not just filename — avoids collisions for
+        # resume.pdf in different folders
+        "external_id": f"resume-{hashlib.md5(file_path.encode()).hexdigest()[:16]}",
         "full_name": full_name[:256],
         "email": email,
         "phone": phone[:32] if phone else None,
@@ -210,22 +247,23 @@ def parse_resume_text(text: str, filename: str) -> dict:
 
 
 # =====================================================================
-# DATABASE INSERT — SAVEPOINT per row to prevent cascade failures
+# DATABASE INSERT — batch insert in chunks for cloud performance
 # =====================================================================
+BATCH_SIZE = 50  # Insert 50 rows per round-trip
+
+
 async def insert_candidates(candidates: list[dict]) -> int:
     """
-    Insert candidates into PostgreSQL one at a time.
+    Batch insert candidates into Supabase/PostgreSQL.
 
-    WHY NOT ONE BIG TRANSACTION?
-        If one insert fails (e.g. duplicate email), PostgreSQL aborts
-        the entire transaction. All subsequent inserts fail too.
+    WHY BATCHES?
+        Over the internet to Supabase, 1 insert per round-trip = 1971 round-trips
+        = 15+ minutes. Batching 50 rows per INSERT = ~40 round-trips = ~30 seconds.
 
-    FIX: Use conn.begin_nested() which creates a SAVEPOINT.
-        If one insert fails, only that SAVEPOINT rolls back.
-        The outer transaction continues with the next candidate.
+    WHY NOT ALL AT ONCE?
+        If one row has bad data, we'd lose all 1971. With batches of 50,
+        we lose at most 50 rows per bad batch.
     """
-    from sqlalchemy.ext.asyncio import create_async_engine
-
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
 
     insert_sql = text("""
@@ -244,22 +282,30 @@ async def insert_candidates(candidates: list[dict]) -> int:
     """)
 
     inserted = 0
-    skipped = 0
-    async with engine.begin() as conn:
-        for candidate in candidates:
-            try:
-                # SAVEPOINT — if this insert fails, only this row is rolled back
-                async with conn.begin_nested():
+    failed_batches = 0
+
+    # Process in batches
+    for i in range(0, len(candidates), BATCH_SIZE):
+        batch = candidates[i:i + BATCH_SIZE]
+        try:
+            async with engine.begin() as conn:
+                for candidate in batch:
                     params = {**candidate, "skills": json.dumps(candidate["skills"])}
                     await conn.execute(insert_sql, params)
-                    inserted += 1
-            except Exception as e:
-                skipped += 1
-                if skipped <= 5:  # Only log first 5 failures to avoid spam
-                    logger.warning("insert_skipped", error=str(e)[:200])
+                inserted += len(batch)
+        except Exception as e:
+            failed_batches += 1
+            if failed_batches <= 3:
+                logger.warning("batch_failed", batch_start=i, error=str(e)[:200])
 
-    if skipped > 0:
-        logger.info("insert_summary", inserted=inserted, skipped=skipped)
+        # Progress feedback every 200 rows
+        if (i + BATCH_SIZE) % 200 == 0:
+            logger.info("insert_progress", done=min(i + BATCH_SIZE, len(candidates)),
+                        total=len(candidates))
+
+    if failed_batches > 0:
+        logger.info("insert_summary", inserted=inserted,
+                    failed_batches=failed_batches)
 
     await engine.dispose()
     return inserted
@@ -288,7 +334,7 @@ async def main() -> None:
     for file_path in tqdm(resume_files, desc="Extracting resumes", unit="file"):
         try:
             text = extract_text_from_file(file_path)
-            candidate = parse_resume_text(text, file_path.name)
+            candidate = parse_resume_text(text, str(file_path))
             candidates.append(candidate)
         except Exception as e:
             failed += 1
