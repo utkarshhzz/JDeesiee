@@ -8,7 +8,6 @@
 # update vector id in supabase to mark a processed
 
 
-from pydantic.v1.utils import generate_model_signature
 import structlog
 import asyncio
 import json
@@ -29,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import settings
 from app.core.logging import setup_logging
 from app.services.chunker import chunk_resume
-import structlog
+
 
 setup_logging(debug=True)
 logger=structlog.get_logger()
@@ -71,7 +70,7 @@ async def fetch_candidates_without_vectors(engine) -> list[dict]:
             "education_level": row[7] or "",
             "current_title": row[8] or "",
         })
-        return candidates
+    return candidates
 
 
 # Gebnerate embedding via openai with retry
@@ -85,18 +84,13 @@ async def fetch_candidates_without_vectors(engine) -> list[dict]:
         wait=retry_state.next_action.sleep,
     ),
 )
-def generate_embeddings_batch(texts: list[str],client: OpenAI) ->
-list[list[float]]:
-# embed a batch of text using OpenAI text-embedding-3-small
-# args texts- List of section texts (max 100 per call)
-# client: openai client instance
-# returns list of embedding vectors 1536 floats
-
-    response=client.embeddings.create(
-    model=settings.OPENAI_EMBEDDING_MODEL,
-    input=texts,
-)
-    return [item.embeddding for item in response.data]
+def generate_embeddings_batch(texts: list[str], client: OpenAI) -> list[list[float]]:
+    """Embed a batch of texts using OpenAI text-embedding-3-small."""
+    response = client.embeddings.create(
+        model=settings.OPENAI_EMBEDDING_MODEL,
+        input=texts,
+    )
+    return [item.embedding for item in response.data]
 
 
 def upload_to_search_index(documents: list[dict],search_client:SearchClient)-> int:
@@ -112,10 +106,10 @@ def upload_to_search_index(documents: list[dict],search_client:SearchClient)-> i
     try:
         result= search_client.merge_or_upload_documents(documents)
         succeeded=sum(1 for r in result if r.succeeded)
-        failed=sum(1 for r in result if r.succeeded)
+        failed=sum(1 for r in result if not r.succeeded)
         if failed > 0:
-            logger.warning("Search uplaod partial failure",succeeded=succeeded,failed=failed)
-            return succeeded
+            logger.warning("search_upload_partial_failure",succeeded=succeeded,failed=failed)
+        return succeeded
     except Exception as e:
         logger.error("search upload failed",error=str(e)[:200])
         return 0
@@ -129,7 +123,7 @@ async def update_vector_ids(candidate_ids:  list[str],engine)-> None:
     async with engine.begin() as conn:
         for cid in candidate_ids:
             await conn.execute(
-                text("UPDATE candidates SET vector_id= 'emnbedded' WHERE id=:cid"),
+                text("UPDATE candidates SET vector_id = 'embedded' WHERE id = :cid"),
                 {"cid":cid},
             )
 

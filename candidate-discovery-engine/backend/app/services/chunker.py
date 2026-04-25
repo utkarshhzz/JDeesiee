@@ -36,7 +36,6 @@ class ResumeSection:
 # we use section header patterns
 # these regex pattern detect common resume sectionheaders
 # we look for these at the start of a line
-import re
 
 SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
@@ -201,14 +200,15 @@ def chunk_resume(text:str) -> list[ResumeSection]:
         logger.debug("no section headers found",text_length=len(text))
         return [ResumeSection(section_type="summary",text=text.strip())]
 
-     # If there's text BEFORE the first section header, it's usually
+    # If there's text BEFORE the first section header, it's usually
     # the candidate's name + contact info. Include it as "header".
     sections: list[ResumeSection]=[]
     first_boundary_pos=boundaries[0][1]
     if first_boundary_pos > MIN_SECTION_CHARS:
-        section_type="header",
-        text=text[:first_boundary_pos].strip()
-        
+        sections.append(ResumeSection(
+            section_type="header",
+            text=text[:first_boundary_pos].strip(),
+        ))
     for i, (section_type, start_pos) in enumerate(boundaries):
         # End position = start of next section, or end of text
         if i + 1 < len(boundaries):
