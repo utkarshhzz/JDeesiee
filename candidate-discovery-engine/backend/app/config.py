@@ -38,17 +38,23 @@ class Settings(BaseSettings):
     # with cost savings (each embedding call costs ~$0.00002).
     EMBEDDING_CACHE_TTL: int = 86400
 
-    # ──────────────────────────────────────────────────────────────────────
-    # AZURE OPENAI
-    # ──────────────────────────────────────────────────────────────────────
-    # These come from your Azure OpenAI resource in the Azure Portal.
-    # Navigate to: Azure Portal → Azure OpenAI → Keys and Endpoint
-    AZURE_OPENAI_API_KEY: str = ""
-    AZURE_OPENAI_ENDPOINT: str = ""  # e.g. "https://myresource.openai.azure.com/"
-    AZURE_OPENAI_API_VERSION: str = "2024-02-01"
+     # OPENAI (Regular API — not Azure OpenAI)
+    # ──────────────────────────────────────────────────────────────
+    # We use the regular OpenAI API because Azure for Students
+    # doesn't have gpt-4o-mini/text-embedding-3-small in available regions.
+    # The architecture is identical — only the client initialization differs
+    OPENAI_API_KEY: str = ""
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"  # 1536 dimensions
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
 
-    # Deployment names — you create these when you deploy models in Azure OpenAI Studio.
-    # These are NOT the model names; they're YOUR chosen deployment names.
+    EMBEDDING_DIMENSIONS : int = 1536
+    EMBEDDING_BATCH_SIZE: int=100
+    SEARCH_UPLOAD_BATCH_SIZE: int=1000
+
+    # Azure OpenAI fields (kept for backward compatibility — empty = disabled)
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_API_VERSION: str = "2024-02-01"
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
     AZURE_OPENAI_CHAT_DEPLOYMENT: str = "gpt-4o-mini"
 
