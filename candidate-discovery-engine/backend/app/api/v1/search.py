@@ -1,42 +1,22 @@
 """
-Search API — POST /api/v1/search
+Search API — POST /api/v1/search + GET /api/v1/search/history + Export
 
-REQUEST:
-    {
-        "jd_text": "We're looking for a senior Python developer with AWS...",
-        "filters": {
-            "location_country": "India",
-            "min_years": 5,
-            "education_level": "Masters"
-        },
-        "top_k": 20
-    }
-
-RESPONSE:
-    {
-        "search_event_id": "abc123-...",
-        "candidates": [
-            {
-                "candidate_id": "def456-...",
-                "match_score": 92,
-                "justifications": ["Strong Python...", "AWS certified...", "No K8s..."],
-                "skills": "Python, AWS, Docker",
-                "location": "Bengaluru, India",
-                "years_of_experience": 8,
-                "education_level": "Masters"
-            },
-            ...
-        ],
-        "latency": { "stage1_ms": 320, "stage2_ms": 780, "total_ms": 1100 }
-    }
+The main search endpoint triggers the full pipeline:
+    Stage 1: Embed JD → Hybrid Search → Top 100
+    Stage 1b: JD Quality Score (parallel, free latency)
+    Stage 2: Batch LLM Score Top 20 → Ranked Results
+    Stage 3: Compute DEI analytics
 """
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.db.session import async_session_factory
@@ -87,37 +67,47 @@ class LatencyBreakdown(BaseModel):
     embedding_cached: bool
 
 
+class JDQualityScore(BaseModel):
+    clarity: int
+    specificity: int
+    inclusivity: int
+    overall: float
+    suggestions: list[str]
+
+
+class AnalyticsResponse(BaseModel):
+    country_distribution: dict[str, int]
+    experience_bands: dict[str, int]
+    education_distribution: dict[str, int]
+    avg_match_score: float
+    score_distribution: dict[str, int]
+
+
 class SearchResponse(BaseModel):
     search_event_id: str
     candidates: list[CandidateResponse]
     total_candidates_searched: int
     latency: LatencyBreakdown
+    jd_quality: JDQualityScore | None = None
+    analytics: AnalyticsResponse | None = None
 
 
-# ── Route ────────────────────────────────────────────────────────────
+# ── Main Search Route ────────────────────────────────────────────────
 @router.post("/search", response_model=SearchResponse)
 async def search_candidates(body: SearchRequest, request: Request):
     """
     Search for candidates matching a job description.
-
-    This is the MAIN endpoint of the entire application.
-    It triggers the full 2-stage pipeline:
-        Stage 1: Embed JD → Hybrid Search → Top 100
-        Stage 2: LLM Score Top 20 → Ranked Results
+    Triggers the full 2-stage pipeline with JD quality scoring and DEI analytics.
     """
     logger.info("search_request", jd_length=len(body.jd_text), filters=body.filters)
 
-    # Get Redis from app state (set up during lifespan)
     redis = request.app.state.redis
 
-    # Get DB session
     async with async_session_factory() as db:
-        # Build filter dict for the pipeline
         filter_dict = None
         if body.filters:
             filter_dict = body.filters.model_dump(exclude_none=True)
 
-        # Execute the full pipeline
         result = await execute_search(
             jd_text=body.jd_text,
             redis=redis,
@@ -143,6 +133,22 @@ async def search_candidates(body: SearchRequest, request: Request):
             education_level=c.education_level or "Unknown",
         ))
 
+    # JD Quality
+    jd_quality_resp = None
+    if result.jd_quality:
+        jd_quality_resp = JDQualityScore(**result.jd_quality)
+
+    # Analytics
+    analytics_resp = None
+    if result.analytics:
+        analytics_resp = AnalyticsResponse(
+            country_distribution=result.analytics.country_distribution,
+            experience_bands=result.analytics.experience_bands,
+            education_distribution=result.analytics.education_distribution,
+            avg_match_score=result.analytics.avg_match_score,
+            score_distribution=result.analytics.score_distribution,
+        )
+
     return SearchResponse(
         search_event_id=result.search_event_id,
         candidates=candidate_responses,
@@ -153,15 +159,15 @@ async def search_candidates(body: SearchRequest, request: Request):
             total_ms=result.total_latency_ms,
             embedding_cached=result.embedding_cache_hit,
         ),
+        jd_quality=jd_quality_resp,
+        analytics=analytics_resp,
     )
 
 
-# ── ADD THIS TO THE EXISTING search.py FILE ──────────────────────
-
+# ── Search History ───────────────────────────────────────────────────
 class SearchHistoryItem(BaseModel):
-    """One past search from the recruiter's history."""
     search_event_id: str
-    jd_snippet: str          # First 200 chars of JD text
+    jd_snippet: str
     candidates_searched: int | None
     total_latency_ms: int | None
     embedding_cached: bool | None
@@ -173,18 +179,8 @@ class SearchHistoryResponse(BaseModel):
 
 
 @router.get("/search/history", response_model=SearchHistoryResponse)
-async def get_search_history(
-    request: Request,
-    limit: int = 20,
-):
-    """
-    Get the last N searches.
-
-    This lets recruiters:
-    1. Re-run a previous search (the cached embedding makes it instant)
-    2. Review past results
-    3. Track their search patterns over time
-    """
+async def get_search_history(request: Request, limit: int = 20):
+    """Get the last N searches for the sidebar."""
     async with async_session_factory() as db:
         result = await db.execute(
             text("""
@@ -211,3 +207,53 @@ async def get_search_history(
 
     return SearchHistoryResponse(history=history)
 
+
+# ── CSV Export ───────────────────────────────────────────────────────
+@router.get("/search/{event_id}/export")
+async def export_search_results(event_id: str):
+    """Export search results as CSV for sharing with hiring managers."""
+    async with async_session_factory() as db:
+        result = await db.execute(
+            text("""
+                SELECT
+                    mr.rank,
+                    c.full_name,
+                    c.email,
+                    c.current_title,
+                    c.current_company,
+                    c.location_city,
+                    c.location_country,
+                    c.years_of_experience,
+                    c.education_level,
+                    mr.match_score,
+                    mr.justification_bullet_1,
+                    mr.justification_bullet_2,
+                    mr.vector_similarity
+                FROM match_results mr
+                JOIN candidates c ON c.id = mr.candidate_id
+                WHERE mr.search_event_id = :event_id
+                ORDER BY mr.rank ASC
+            """),
+            {"event_id": event_id},
+        )
+        rows = result.fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Rank", "Name", "Email", "Title", "Company",
+        "City", "Country", "Experience (years)", "Education",
+        "Match Score", "Strength", "Gap/Note", "Vector Similarity",
+    ])
+
+    for row in rows:
+        writer.writerow(list(row))
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=search_{event_id[:8]}_results.csv",
+        },
+    )

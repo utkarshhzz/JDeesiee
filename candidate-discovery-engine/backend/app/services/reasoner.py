@@ -1,14 +1,16 @@
 """
-LLM Reasoner — concurrent GPT-4o-mini scoring of candidates.
+LLM Reasoner — batch GPT-4o-mini scoring of candidates.
 
-Takes top N candidates from vector search and scores each against the JD.
-Uses AsyncOpenAI for true async concurrency — 20 parallel calls in ~800ms
-instead of 20 sequential calls taking ~8 seconds.
+PERFORMANCE OPTIMIZATION:
+    Instead of 20 individual API calls (~14s), we batch 10 candidates
+    per prompt and run 2 prompts in parallel → total ~3-4s.
+
+    Old approach: 20 calls × ~700ms each = 14s (even with asyncio.gather)
+    New approach: 2 calls × ~2s each (in parallel) = ~3s
 
 COST:
     GPT-4o-mini: $0.15/1M input tokens, $0.60/1M output tokens.
-    Per search: ~20 calls × ~500 tokens each = ~10K tokens = $0.0015/search.
-    At 1000 searches/day = $1.50/day.
+    Per search: ~2 calls × ~2500 tokens each = ~5K tokens = $0.001/search.
 """
 
 from __future__ import annotations
@@ -43,28 +45,31 @@ def _get_openai_client() -> AsyncOpenAI:
     return _openai_client
 
 
-SYSTEM_PROMPT = """You are an expert technical recruiter AI. Your job is to evaluate how well a candidate matches a job description.
+BATCH_SYSTEM_PROMPT = """You are an expert, unbiased technical recruiter AI. Your task is to evaluate how well MULTIPLE candidates match a job description.
 
 SCORING RUBRIC:
-- 90-100: Near-perfect match. Candidate has ALL required skills, matching experience level, and relevant domain experience.
-- 75-89:  Strong match. Candidate has most required skills, close experience level. Minor gaps are easily bridgeable.
-- 60-74:  Moderate match. Candidate has some required skills but is missing key requirements. Worth considering.
-- 40-59:  Weak match. Significant skill gaps. Candidate would need substantial training.
+- 90-100: Near-perfect match. ALL required skills, matching experience level, relevant domain.
+- 75-89:  Strong match. Most required skills, close experience level. Minor gaps easily bridgeable.
+- 60-74:  Moderate match. Some required skills but missing key requirements. Worth considering.
+- 40-59:  Weak match. Significant skill gaps. Would need substantial training.
 - 0-39:   Poor match. Fundamentally different skill set or experience level.
 
-IMPORTANT RULES:
-1. Score based on SKILLS and EXPERIENCE alignment, not demographics.
-2. Consider transferable skills (e.g., "Django" experience transfers to "FastAPI").
-3. Weigh recent experience more heavily than older experience.
-4. A candidate who exceeds requirements should still score 90+, not be penalized.
+STRICT RULES:
+1. Evaluate ONLY: technical skills, years of experience, domain expertise.
+2. COMPLETELY IGNORE: name, gender, age, nationality, ethnicity, institution prestige, demographics.
+3. Consider transferable skills (e.g. Django → FastAPI).
+4. Weigh recent experience more heavily.
 
-Respond ONLY with valid JSON in this exact format:
-{
-    "score": <integer 0-100>,
-    "justification_1": "<one sentence: strongest match reason>",
-    "justification_2": "<one sentence: second strongest match reason>",
-    "justification_3": "<one sentence: biggest gap or concern>"
-}"""
+Respond with ONLY valid JSON — a JSON array of objects, one per candidate, in the SAME ORDER as presented:
+[
+    {
+        "index": 0,
+        "score": <integer 0-100>,
+        "bullet_1": "<strongest match reason>",
+        "bullet_2": "<biggest gap or secondary strength>"
+    },
+    ...
+]"""
 
 
 @dataclass
@@ -87,36 +92,36 @@ class ScoredCandidate:
     tokens_used: int
 
 
-async def _score_single_candidate(
-    jd_text: str,
-    candidate: SearchHit,
-    client: AsyncOpenAI,
-) -> ScoredCandidate:
-    """
-    Score a single candidate against the JD using GPT-4o-mini.
+def _build_batch_prompt(jd_text: str, candidates: list[SearchHit]) -> str:
+    """Build a single prompt containing all candidate profiles for batch scoring."""
+    parts = [f"## Job Description\n{jd_text[:3000]}\n\n## Candidates to Evaluate\n"]
 
-    Now fully async — uses AsyncOpenAI so it doesn't block the event loop.
-    No need for asyncio.to_thread anymore.
+    for i, c in enumerate(candidates):
+        parts.append(f"""### Candidate {i}
+Section ({c.section_type}): {c.section_text[:800]}
+Skills: {c.skills_str}
+Experience: {c.years_of_experience} years | Education: {c.education_level}
+Location: {c.location_city}, {c.location_country}
+""")
+
+    parts.append(f"\nScore all {len(candidates)} candidates. Return a JSON array with {len(candidates)} objects.")
+    return "\n".join(parts)
+
+
+async def _batch_score(
+    jd_text: str,
+    candidates: list[SearchHit],
+    client: AsyncOpenAI,
+) -> tuple[list[ScoredCandidate], int, int]:
+    """
+    Score a batch of candidates in a single LLM call.
+
+    Returns:
+        Tuple of (scored_candidates, latency_ms, tokens_used)
     """
     t0 = time.monotonic()
+    prompt = _build_batch_prompt(jd_text, candidates)
 
-    user_prompt = f"""## Job Description
-{jd_text[:3000]}
-
-## Candidate Resume Section ({candidate.section_type})
-{candidate.section_text[:3000]}
-
-## Candidate Skills
-{candidate.skills_str}
-
-## Candidate Info
-- Location: {candidate.location_city}, {candidate.location_country}
-- Experience: {candidate.years_of_experience} years
-- Education: {candidate.education_level}
-
-Score this candidate against the job description. Respond with JSON only."""
-
-    # Retry with exponential backoff on any error
     response = None
     async for attempt in AsyncRetrying(
         wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -127,11 +132,11 @@ Score this candidate against the job description. Respond with JSON only."""
             response = await client.chat.completions.create(
                 model=settings.OPENAI_CHAT_MODEL,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "system", "content": BATCH_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.0,
-                max_tokens=200,
+                max_tokens=1500,
                 response_format={"type": "json_object"},
             )
 
@@ -139,36 +144,67 @@ Score this candidate against the job description. Respond with JSON only."""
     tokens_used = response.usage.total_tokens if response.usage else 0
     latency_ms = int((time.monotonic() - t0) * 1000)
 
+    # Parse the batch response
+    scored: list[ScoredCandidate] = []
     try:
         parsed = json.loads(content)
-        score = max(0, min(100, int(parsed.get("score", 0))))
-        j1 = parsed.get("justification_1", "No justification provided.")
-        j2 = parsed.get("justification_2", "")
-        j3 = parsed.get("justification_3", "")
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("llm_parse_failed", content=content[:100])
-        score = 0
-        j1 = "Failed to parse LLM response."
-        j2 = ""
-        j3 = ""
+        # Handle both {"candidates": [...]} and [...] formats
+        if isinstance(parsed, dict):
+            items = parsed.get("candidates", parsed.get("results", []))
+            if not items:
+                # Try to find any list value in the dict
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        items = v
+                        break
+        else:
+            items = parsed
 
-    return ScoredCandidate(
-        candidate_postgres_id=candidate.candidate_postgres_id,
-        match_score=score,
-        vector_similarity=candidate.search_score,
-        justification_1=j1,
-        justification_2=j2,
-        justification_3=j3,
-        section_type=candidate.section_type,
-        section_text=candidate.section_text,
-        skills_str=candidate.skills_str,
-        location_country=candidate.location_country,
-        location_city=candidate.location_city,
-        years_of_experience=candidate.years_of_experience,
-        education_level=candidate.education_level,
-        latency_ms=latency_ms,
-        tokens_used=tokens_used,
-    )
+        for item in items:
+            idx = item.get("index", len(scored))
+            if idx < len(candidates):
+                c = candidates[idx]
+                scored.append(ScoredCandidate(
+                    candidate_postgres_id=c.candidate_postgres_id,
+                    match_score=max(0, min(100, int(item.get("score", 0)))),
+                    vector_similarity=c.search_score,
+                    justification_1=item.get("bullet_1", ""),
+                    justification_2=item.get("bullet_2", ""),
+                    justification_3="",
+                    section_type=c.section_type,
+                    section_text=c.section_text,
+                    skills_str=c.skills_str,
+                    location_country=c.location_country,
+                    location_city=c.location_city,
+                    years_of_experience=c.years_of_experience,
+                    education_level=c.education_level,
+                    latency_ms=latency_ms,
+                    tokens_used=tokens_used // max(1, len(items)),
+                ))
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        logger.error("batch_parse_failed", error=str(e)[:200], content=content[:200])
+        # Fallback: assign score 0 for unparseable candidates
+        for c in candidates:
+            if not any(s.candidate_postgres_id == c.candidate_postgres_id for s in scored):
+                scored.append(ScoredCandidate(
+                    candidate_postgres_id=c.candidate_postgres_id,
+                    match_score=0,
+                    vector_similarity=c.search_score,
+                    justification_1="LLM response could not be parsed.",
+                    justification_2="",
+                    justification_3="",
+                    section_type=c.section_type,
+                    section_text=c.section_text,
+                    skills_str=c.skills_str,
+                    location_country=c.location_country,
+                    location_city=c.location_city,
+                    years_of_experience=c.years_of_experience,
+                    education_level=c.education_level,
+                    latency_ms=latency_ms,
+                    tokens_used=0,
+                ))
+
+    return scored, latency_ms, tokens_used
 
 
 async def score_candidates(
@@ -177,47 +213,80 @@ async def score_candidates(
     max_concurrent: int = 20,
 ) -> tuple[list[ScoredCandidate], int]:
     """
-    Score multiple candidates concurrently using GPT-4o-mini.
+    Score candidates using batch GPT-4o-mini calls.
 
-    Uses asyncio.gather with true async calls — no thread pool needed.
-    All 20 calls run concurrently on the event loop without blocking.
+    Splits candidates into batches of 10 and runs them in parallel.
+    This reduces 20 individual API calls (~14s) to 2 parallel calls (~3s).
     """
     client = _get_openai_client()
     t0 = time.monotonic()
 
-    # Create async tasks (true async, not thread-based)
-    tasks = [
-        _score_single_candidate(jd_text, candidate, client)
-        for candidate in candidates[:max_concurrent]
+    # Take at most max_concurrent candidates
+    to_score = candidates[:max_concurrent]
+
+    # Split into batches of 10
+    batch_size = 10
+    batches = [
+        to_score[i:i + batch_size]
+        for i in range(0, len(to_score), batch_size)
     ]
 
-    # Wait for ALL tasks to complete concurrently
+    logger.info(
+        "batch_scoring_start",
+        total_candidates=len(to_score),
+        num_batches=len(batches),
+        batch_size=batch_size,
+    )
+
+    # Run all batches in parallel
+    tasks = [_batch_score(jd_text, batch, client) for batch in batches]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Filter out errors and collect successful scores
-    scored: list[ScoredCandidate] = []
+    # Collect all scored candidates
+    all_scored: list[ScoredCandidate] = []
+    total_tokens = 0
+
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             logger.error(
-                "scoring_failed",
-                candidate_id=candidates[i].candidate_postgres_id,
-                error=str(result)[:100],
+                "batch_scoring_failed",
+                batch_index=i,
+                error=str(result)[:200],
             )
+            # Fallback: assign score based on vector similarity
+            for c in batches[i]:
+                all_scored.append(ScoredCandidate(
+                    candidate_postgres_id=c.candidate_postgres_id,
+                    match_score=int(c.search_score * 100),
+                    vector_similarity=c.search_score,
+                    justification_1="Scoring failed — using vector similarity as fallback.",
+                    justification_2="",
+                    justification_3="",
+                    section_type=c.section_type,
+                    section_text=c.section_text,
+                    skills_str=c.skills_str,
+                    location_country=c.location_country,
+                    location_city=c.location_city,
+                    years_of_experience=c.years_of_experience,
+                    education_level=c.education_level,
+                    latency_ms=0,
+                    tokens_used=0,
+                ))
         else:
-            scored.append(result)
+            scored, _, tokens = result
+            all_scored.extend(scored)
+            total_tokens += tokens
 
-    # Sort by match_score descending (best candidate first)
-    scored.sort(key=lambda s: s.match_score, reverse=True)
+    # Sort by match_score descending
+    all_scored.sort(key=lambda s: s.match_score, reverse=True)
 
     total_latency_ms = int((time.monotonic() - t0) * 1000)
-    total_tokens = sum(s.tokens_used for s in scored)
-
     logger.info(
         "scoring_complete",
-        candidates_scored=len(scored),
+        candidates_scored=len(all_scored),
         total_latency_ms=total_latency_ms,
         total_tokens=total_tokens,
-        top_score=scored[0].match_score if scored else 0,
+        top_score=all_scored[0].match_score if all_scored else 0,
     )
 
-    return scored, total_latency_ms
+    return all_scored, total_latency_ms
