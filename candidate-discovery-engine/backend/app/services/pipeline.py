@@ -232,7 +232,7 @@ async def execute_search(
         top_k=top_k_retrieval,
         filters=filters,
     )
-    quality_task = score_jd_quality(jd_text)
+    quality_task = score_jd_quality(jd_text, redis=redis)
 
     (search_hits, search_latency_ms), jd_quality = await asyncio.gather(
         search_task, quality_task

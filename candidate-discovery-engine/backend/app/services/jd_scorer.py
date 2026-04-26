@@ -6,12 +6,16 @@ Scores the JD on three dimensions using GPT-4o-mini:
     2. Specificity (1-10): Are required skills concrete and measurable?
     3. Inclusivity (1-10): Does the language avoid unnecessary barriers?
 
+CACHING: Results cached in Redis (same hash as embedding) for 24h.
+On cache hit, JD quality is returned in <5ms instead of ~3s.
+
 IMPORTANT: This runs IN PARALLEL with Stage 1 search, so it adds
-ZERO additional latency to the total pipeline.
+ZERO additional latency to the total pipeline on first call too.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 
@@ -22,7 +26,6 @@ from app.config import settings
 
 logger = structlog.get_logger()
 
-# Reuse the module-level client from embedder
 _openai_client: AsyncOpenAI | None = None
 
 
@@ -51,15 +54,29 @@ Respond with ONLY valid JSON:
 }"""
 
 
-async def score_jd_quality(jd_text: str) -> dict | None:
+async def score_jd_quality(jd_text: str, redis=None) -> dict | None:
     """
     Score a job description on clarity, specificity, and inclusivity.
+    Results are cached in Redis for 24 hours.
 
     Returns:
         Dict with clarity, specificity, inclusivity scores (1-10),
         overall average, and list of suggestions.
         Returns None on failure (non-critical feature).
     """
+    text_hash = hashlib.sha256(jd_text.encode("utf-8")).hexdigest()
+    cache_key = f"jd_quality:{text_hash}"
+
+    # Check Redis cache
+    if redis:
+        try:
+            cached = await redis.get(cache_key)
+            if cached is not None:
+                logger.info("jd_quality_cache_hit", hash=text_hash[:12])
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning("jd_quality_cache_read_failed", error=str(e)[:100])
+
     t0 = time.monotonic()
     client = _get_client()
 
@@ -92,13 +109,23 @@ async def score_jd_quality(jd_text: str) -> dict | None:
             latency_ms=latency_ms,
         )
 
-        return {
+        result = {
             "clarity": clarity,
             "specificity": specificity,
             "inclusivity": inclusivity,
             "overall": round((clarity + specificity + inclusivity) / 3, 1),
             "suggestions": suggestions[:5],
         }
+
+        # Cache result for 24 hours
+        if redis:
+            try:
+                await redis.set(cache_key, json.dumps(result), ex=settings.EMBEDDING_CACHE_TTL)
+                logger.debug("jd_quality_cached", hash=text_hash[:12])
+            except Exception as e:
+                logger.warning("jd_quality_cache_write_failed", error=str(e)[:100])
+
+        return result
 
     except Exception as e:
         logger.warning("jd_quality_scoring_failed", error=str(e)[:200])

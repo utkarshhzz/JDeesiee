@@ -5,10 +5,12 @@ import JDUploader from '../components/JDUploader';
 import SearchResults from '../components/SearchResults';
 import SearchHistorySidebar from '../components/SearchHistorySidebar';
 import { useSearch, useFileSearch } from '../hooks/useSearch';
+import { useSearchContext } from '../hooks/useSearchContext';
 import type { SearchResponse } from '../types';
 
 export default function SearchPage() {
-  const [jdText, setJdText] = useState('');
+  const { lastResults, setLastResults, lastJdText, setLastJdText } = useSearchContext();
+  const [jdText, setJdText] = useState(lastJdText);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showHistory, setShowHistory] = useState(true);
@@ -21,19 +23,20 @@ export default function SearchPage() {
   const queryClient = useQueryClient();
 
   const isLoading = textSearch.isPending || fileSearch.isPending;
-  const searchData: SearchResponse | null =
-    textSearch.data ?? fileSearch.data ?? null;
-  const error = textSearch.error ?? fileSearch.error;
 
-  const canSearch =
-    !isLoading && (jdText.length >= 50 || selectedFile !== null);
+  // Use context data (persists across navigation) OR fresh mutation data
+  const searchData: SearchResponse | null =
+    textSearch.data ?? fileSearch.data ?? lastResults;
+  const error = textSearch.error ?? fileSearch.error;
 
   function handleSearch() {
     if (selectedFile) {
       fileSearch.mutate(
         { file: selectedFile, topK },
         {
-          onSuccess: () => {
+          onSuccess: (data) => {
+            setLastResults(data);
+            setLastJdText(jdText);
             queryClient.invalidateQueries({ queryKey: ['search-history'] });
           },
         }
@@ -50,13 +53,23 @@ export default function SearchPage() {
           top_k: topK,
         },
         {
-          onSuccess: () => {
+          onSuccess: (data) => {
+            setLastResults(data);
+            setLastJdText(jdText);
             queryClient.invalidateQueries({ queryKey: ['search-history'] });
           },
         }
       );
     }
   }
+
+  function handleJdTextChange(text: string) {
+    setJdText(text);
+    setLastJdText(text);
+  }
+
+  const canSearch =
+    !isLoading && (jdText.length >= 50 || selectedFile !== null);
 
   return (
     <div
@@ -79,7 +92,7 @@ export default function SearchPage() {
         >
           <SearchHistorySidebar
             onSelectJd={(text) => {
-              setJdText(text);
+              handleJdTextChange(text);
               setSelectedFile(null);
             }}
           />
@@ -168,7 +181,7 @@ export default function SearchPage() {
 
             <JDUploader
               jdText={jdText}
-              onJdTextChange={setJdText}
+              onJdTextChange={handleJdTextChange}
               onFileSelect={(file) => setSelectedFile(file)}
               selectedFile={selectedFile}
               onClearFile={() => setSelectedFile(null)}
@@ -275,7 +288,7 @@ export default function SearchPage() {
             >
               {isLoading ? (
                 <>
-                  <Loader2 size={18} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
                   Searching...
                 </>
               ) : (
@@ -321,7 +334,6 @@ export default function SearchPage() {
         </div>
       </main>
 
-      {/* Spinner keyframe (inline since Tailwind v4 doesn't ship animate-spin by default) */}
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }

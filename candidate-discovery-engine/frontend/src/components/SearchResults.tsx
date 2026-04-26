@@ -3,6 +3,9 @@ import { AnimatePresence } from 'framer-motion';
 import { Users, SearchX } from 'lucide-react';
 import CandidateCard from './CandidateCard';
 import LatencyBar from './LatencyBar';
+import JDQualityCard from './JDQualityCard';
+import AnalyticsDashboard from './AnalyticsDashboard';
+import ExportButton from './ExportButton';
 import type { SearchResponse } from '../types';
 
 interface SearchResultsProps {
@@ -153,16 +156,25 @@ export default function SearchResults({ data, isLoading }: SearchResultsProps) {
           </strong>{' '}
           candidates matched
         </span>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          Sorted by match score
-        </span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ExportButton searchEventId={data.search_event_id} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Sorted by match score
+          </span>
+        </div>
       </div>
+
+      {/* JD Quality Card */}
+      {data.jd_quality && <JDQualityCard quality={data.jd_quality} />}
 
       {/* Latency bar */}
       <LatencyBar
         latency={data.latency}
         candidatesSearched={data.total_candidates_searched}
       />
+
+      {/* DEI Analytics Dashboard */}
+      {data.analytics && <AnalyticsDashboard analytics={data.analytics} />}
 
       {/* Cards */}
       <AnimatePresence>

@@ -1,54 +1,69 @@
-# ============================================================================
-# Docker Compose — Local Development Environment
-# ============================================================================
-# WHAT THIS DOES:
-#   Spins up PostgreSQL and Redis locally in Docker containers.
-#   You don't need to install PostgreSQL or Redis on your machine.
-#   Just run: docker-compose up -d
-#
-# WHY DOCKER?
-#   1. Consistent: Same versions as production (PostgreSQL 16, Redis 7)
-#   2. Clean: Stop the containers and your machine is clean
-#   3. Fast: Takes 30 seconds to spin up, not 30 minutes to install
-#   4. Shareable: Anyone cloning the repo can run `docker-compose up` and go
-# ============================================================================
+# ── Docker Compose: Local Development ────────────────────────────────
+# Run:  docker-compose up --build
+# This starts PostgreSQL, Redis, the FastAPI backend, and React frontend.
+# All services communicate on the same Docker network.
 
 services:
-  # ── PostgreSQL Database ─────────────────────────────────────────────
+  # ── PostgreSQL 16 ──────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine    # Alpine = smaller Docker image (~80MB vs ~400MB)
-    container_name: jdeesiee-postgres
+    image: postgres:16-alpine
     environment:
+      POSTGRES_DB: candidate_engine
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: JDEesiee     # Creates this database on first startup
     ports:
-      - "5433:5432"              # 5433 on host → 5432 in container (avoids local PG conflict)
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data  # Persist data across restarts
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 5
 
-  # ── Redis Cache ─────────────────────────────────────────────────────
+  # ── Redis 7 ────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: jdeesiee-redis
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 5
 
-# ── Named Volumes ───────────────────────────────────────────────────
-# Docker volumes persist data even when containers are stopped/removed.
-# Without this, every `docker-compose down` would delete your database!
+  # ── FastAPI Backend ────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/candidate_engine
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── React Frontend (dev server) ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      - backend
+
 volumes:
-  postgres_data:
-  redis_data:
+  pgdata:
