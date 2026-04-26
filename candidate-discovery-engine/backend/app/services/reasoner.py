@@ -16,7 +16,7 @@ from app.config import settings
 from app.services.vector_search import SearchHit
 logger = structlog.get_logger()
 
-_openai_client :OpenAI | None
+_openai_client :OpenAI | None=None
 def _get_openai_client() -> OpenAI:
     global _openai_client
     if _openai_client is None:
