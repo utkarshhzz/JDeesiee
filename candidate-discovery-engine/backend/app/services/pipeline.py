@@ -102,27 +102,29 @@ async def execute_search(
             text("""
                 INSERT INTO search_events (
                     id, recruiter_id, jd_text_hash, jd_raw_text,
-                    candidates_searched, candidates_scored,
+                    candidates_searched,
                     latency_embedding_ms, latency_stage1_ms,
-                    latency_stage2_ms, total_latency_ms
+                    latency_stage2_ms, total_latency_ms,
+                    embedding_cache_hit
                 ) VALUES (
                     :id, :recruiter_id, :jd_hash, :jd_text,
-                    :searched, :scored,
+                    :searched,
                     :embed_ms, :stage1_ms,
-                    :stage2_ms, :total_ms
+                    :stage2_ms, :total_ms,
+                    :cache_hit
                 )
             """),
             {
                 "id": search_event_id,
                 "recruiter_id": recruiter_id,
                 "jd_hash": jd_hash,
-                "jd_text": jd_text[:10000],  # Truncate very long JDs
+                "jd_text": jd_text[:10000],
                 "searched": len(search_hits),
-                "scored": len(scored_candidates),
                 "embed_ms": 0 if cache_hit else stage1_ms,
                 "stage1_ms": stage1_ms,
                 "stage2_ms": stage2_ms,
                 "total_ms": total_ms,
+                "cache_hit": cache_hit,
             },
         )
         await db.commit()

@@ -37,7 +37,7 @@ async def lifespan(app:FastAPI):
         await app.state.redis.ping()
         logger.info("redis_connected", url=settings.REDIS_URL)
     except Exception as e:
-        logger.error("redis_connection_failed", error=str(e))ger
+        logger.error("redis_connection_failed", error=str(e))
 
     app.state.db_factory=async_session_factory
     yield
