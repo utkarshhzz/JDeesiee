@@ -153,3 +153,60 @@ async def search_candidates(body: SearchRequest, request: Request):
             embedding_cached=result.embedding_cache_hit,
         ),
     )
+
+
+# ── ADD THIS TO THE EXISTING search.py FILE ──────────────────────
+
+class SearchHistoryItem(BaseModel):
+    """One past search from the recruiter's history."""
+    search_event_id: str
+    jd_snippet: str          # First 200 chars of JD text
+    candidates_searched: int | None
+    total_latency_ms: int | None
+    embedding_cached: bool | None
+    searched_at: str
+
+
+class SearchHistoryResponse(BaseModel):
+    history: list[SearchHistoryItem]
+
+
+@router.get("/search/history", response_model=SearchHistoryResponse)
+async def get_search_history(
+    request: Request,
+    limit: int = 20,
+):
+    """
+    Get the last N searches.
+
+    This lets recruiters:
+    1. Re-run a previous search (the cached embedding makes it instant)
+    2. Review past results
+    3. Track their search patterns over time
+    """
+    async with async_session_factory() as db:
+        result = await db.execute(
+            text("""
+                SELECT id, jd_raw_text, candidates_searched,
+                       total_latency_ms, embedding_cache_hit, created_at
+                FROM search_events
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """),
+            {"limit": limit},
+        )
+
+        history = []
+        for row in result.fetchall():
+            jd_text = row[1] or ""
+            history.append(SearchHistoryItem(
+                search_event_id=str(row[0]),
+                jd_snippet=jd_text[:200],
+                candidates_searched=row[2],
+                total_latency_ms=row[3],
+                embedding_cached=row[4],
+                searched_at=row[5].isoformat() if row[5] else "",
+            ))
+
+    return SearchHistoryResponse(history=history)
+

@@ -9,6 +9,8 @@ from app.config import settings
 from app.core.logging import setup_logging
 from app.db.session import async_session_factory
 from app.api.v1.search import router as search_router
+from app.api.v1.ingest import router as ingest_router
+from app.api.v1.candidates import router as candidates_router
 
 setup_logging()
 logger = structlog.get_logger()
@@ -61,6 +63,8 @@ def create_app() -> FastAPI:
     )
     # ── Mount API routes ─────────────────────────────────────────
     app.include_router(search_router, prefix="/api/v1")
+    app.include_router(ingest_router, prefix="/api/v1")
+    app.include_router(candidates_router, prefix="/api/v1")
     # ── Health check ─────────────────────────────────────────────
     @app.get("/health")
     async def health():
