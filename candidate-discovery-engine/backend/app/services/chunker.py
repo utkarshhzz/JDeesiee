@@ -41,7 +41,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "summary",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:professional\s+)?(?:summary|profile|objective|about\s+me|overview|career\s+summary|career\s+objective|personal\s+summary|professional\s+profile|resume\s+summary|executive\s+summary|candidate\s+profile|self\s+summary)"
             r")\b",
             re.IGNORECASE | re.MULTILINE,
@@ -50,7 +50,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "experience",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:(?:work|professional|employment|career|job)\s+)?(?:experience|history|background)"
             r"|(?:professional\s+experience|work\s+experience|employment\s+history|work\s+history|career\s+history|relevant\s+experience|industry\s+experience|internship\s+experience|internships|internship)"
             r"|(?:positions?|roles?|employment|jobs?)"
@@ -61,7 +61,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "skills",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:(?:technical|core|key|professional|relevant|additional)\s+)?(?:skills|competencies|technologies|tech\s*stack|expertise)"
             r"|(?:technical\s+skills|core\s+skills|key\s+skills|professional\s+skills|soft\s+skills|hard\s+skills|computer\s+skills|it\s+skills)"
             r"|(?:areas?\s+of\s+expertise|areas?\s+of\s+specialization|specialties|specializations|capabilities|proficiencies|strengths)"
@@ -73,7 +73,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "education",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:education|academic|qualifications|degrees?)"
             r"|(?:educational\s+background|academic\s+background|academic\s+qualification|academic\s+qualifications)"
             r"|(?:studies|study|schooling|formal\s+education|higher\s+education|undergraduate\s+education|postgraduate\s+education)"
@@ -85,7 +85,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "certifications",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:certifications?|licenses?|courses?|training|professional\s+development)"
             r"|(?:certificates?|credential(s)?|accreditation|accreditations|licensure)"
             r"|(?:online\s+courses?|workshops?|seminars?|bootcamps?|workshop\s+training)"
@@ -98,7 +98,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "projects",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:projects?|portfolio|personal\s+projects?|side\s+projects?|open\s+source)"
             r"|(?:selected\s+projects?|academic\s+projects?|major\s+projects?|mini\s+projects?|capstone\s+projects?)"
             r"|(?:project\s+work|project\s+experience|research\s+projects?|application\s+projects?)"
@@ -111,7 +111,7 @@ SECTION_PATTERNS: list[tuple[str, re.Pattern]] = [
     (
         "publications",
         re.compile(
-            r"^(?:"
+            r"^\s*(?:"
             r"(?:publications?|papers?|research|patents?)"
             r"|(?:published\s+work|publication\s+list|selected\s+publications|journal\s+articles?|conference\s+papers?|technical\s+papers?)"
             r"|(?:articles?|book\s+chapters?|theses?|dissertations?|reports?)"
