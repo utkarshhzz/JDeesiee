@@ -44,7 +44,7 @@ def _sign_payload(payload_bytes:bytes,secret: str) -> str:
         4. Reject if they don't match (tampered payload)
     """
 
-    return hmac.new(
+    return hmac.HMAC(
         secret.encode("utf-8"),
         payload_bytes,
         hashlib.sha256,

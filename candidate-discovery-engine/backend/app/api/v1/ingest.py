@@ -13,7 +13,7 @@ different validation  rules (file size,type checking)
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter,FIle,Form,HTTPException,Request,UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.db.session import async_session_factory

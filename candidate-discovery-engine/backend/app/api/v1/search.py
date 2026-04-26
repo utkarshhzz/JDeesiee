@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 
 from app.db.session import async_session_factory
 from app.services.pipeline import execute_search
+from sqlalchemy import text
 
 logger = structlog.get_logger()
 router = APIRouter(tags=["search"])
